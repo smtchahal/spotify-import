@@ -4,11 +4,12 @@ import argparse
 import csv
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import List
+from typing import List, Optional
 
 import spotipy
 from dotenv import load_dotenv
 from spotipy import SpotifyOAuth
+from spotipy.exceptions import SpotifyException
 
 
 def dict_get(adict: dict, *keys: str):
@@ -73,9 +74,10 @@ class SpotifyImport:
             self.sp.current_user_saved_tracks_add(tracks)
             print(f'Added {len(tracks)} tracks to library')
 
-    def _save_tracks(self, tracks: List[str], failed_count: int):
+    def _save_tracks(self, tracks: List[str], failed_count: int, playlist: Optional[dict] = None):
         if self.destination == 'playlist':
-            playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
+            if playlist is None:
+                playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
             self.sp.playlist_add_items(playlist['id'], tracks)
         else:
             self._save_tracks_to_library(tracks)
@@ -83,6 +85,8 @@ class SpotifyImport:
               f'failed to add {failed_count} songs (see failed.txt)')
 
     def _run_txt(self):
+        playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
+
         with open(self.songs) as songs_file, open('failed.txt', 'w') as failed_file:
             tracks = []
             failed_count = 0
@@ -93,26 +97,34 @@ class SpotifyImport:
                 if not song:
                     continue
 
-                result = self.sp.search(song, limit=1)
-                track_items = dict_get(result, 'tracks', 'items')
-                track_id = track_items[0].get('id') if track_items else None
-                if track_id:
-                    tracks.append(track_id)
-                else:
+                try:
+                    result = self.sp.search(song, limit=1)
+                except SpotifyException as e:
                     failed_count += 1
-                    print(f"Couldn't find anything for {song!r}: {result!r}")
+                    print(f"Couldn't retrieve tracks for {song!r}: {e}")
                     print(song, file=failed_file)
+                else:
+                    track_items = dict_get(result, 'tracks', 'items')
+                    track_id = track_items[0].get('id') if track_items else None
+                    if track_id:
+                        tracks.append(track_id)
+                    else:
+                        failed_count += 1
+                        print(f"Couldn't find anything for {song!r}: {result!r}")
+                        print(song, file=failed_file)
 
-                if len(tracks) == self.PLAYLIST_ADD_TRACK_LIMIT:
-                    self._save_tracks(tracks, failed_count)
-                    tracks = []
+                    if len(tracks) == self.PLAYLIST_ADD_TRACK_LIMIT:
+                        self._save_tracks(tracks, failed_count, playlist)
+                        tracks = []
 
             if tracks:
-                self._save_tracks(tracks, failed_count)
+                self._save_tracks(tracks, failed_count, playlist)
 
         print('Done!')
 
     def _run_csv(self):
+        playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
+
         with open(self.songs) as songs_csv, open('failed.txt', 'w') as failed_file:
             tracks = []
             failed_count = 0
@@ -150,11 +162,11 @@ class SpotifyImport:
                 tracks.append(track_id)
 
                 if len(tracks) == self.LIBRARY_ADD_TRACK_LIMIT:
-                    self._save_tracks(tracks, failed_count)
+                    self._save_tracks(tracks, failed_count, playlist)
                     tracks = []
 
             if tracks:
-                self._save_tracks(tracks, failed_count)
+                self._save_tracks(tracks, failed_count, playlist)
 
             print('Done!')
 
