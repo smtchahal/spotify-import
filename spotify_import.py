@@ -5,11 +5,12 @@ import csv
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import List, Optional
-
+import requests
 import spotipy
 from dotenv import load_dotenv
 from spotipy import SpotifyOAuth
 from spotipy.exceptions import SpotifyException
+from tqdm import tqdm
 
 
 def dict_get(adict: dict, *keys: str):
@@ -76,6 +77,11 @@ class SpotifyImport:
             self.sp.current_user_saved_tracks_add(tracks)
             print(f'Added {len(tracks)} tracks to library')
 
+    def _create_playlist_if_needed(self) -> Optional[dict]:
+        if self.destination != 'playlist':
+            return None
+        return self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
+
     def _save_tracks(self, tracks: List[str], failed_count: int, playlist: Optional[dict] = None):
         if self.destination == 'playlist':
             if playlist is None:
@@ -87,21 +93,24 @@ class SpotifyImport:
               f'failed to add {failed_count} songs (see failed.txt)')
 
     def _run_txt(self):
-        playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
-
-        with open(self.songs) as songs_file, open('failed.txt', 'w') as failed_file:
+        playlist = self._create_playlist_if_needed()
+        with open(self.songs) as songs_file:
+            songs_raw = [line.strip() for line in songs_file]
+        pbar = tqdm(songs_raw, bar_format="{l_bar}{bar} [ time left: {remaining}, time spent: {elapsed}]")
+        with open('failed.txt', 'w') as failed_file:
             tracks = []
             failed_count = 0
-
-            for song in (line.strip() for line in songs_file):
+            for song in pbar:
                 song = replace_bad_words(song)
+                pbar.set_description(song)
 
                 if not song:
                     continue
 
                 try:
                     result = self.sp.search(song, limit=1)
-                except SpotifyException as e:
+                except (SpotifyException, requests.exceptions.ConnectionError,
+                        requests.exceptions.ReadTimeout) as e:
                     failed_count += 1
                     print(f"Couldn't retrieve tracks for {song!r}: {e}")
                     print(song, file=failed_file)
@@ -115,9 +124,9 @@ class SpotifyImport:
                         print(f"Couldn't find anything for {song!r}: {result!r}")
                         print(song, file=failed_file)
 
-                    if len(tracks) == self.PLAYLIST_ADD_TRACK_LIMIT:
-                        self._save_tracks(tracks, failed_count, playlist)
-                        tracks = []
+                if len(tracks) == self.PLAYLIST_ADD_TRACK_LIMIT:
+                    self._save_tracks(tracks, failed_count, playlist)
+                    tracks = []
 
             if tracks:
                 self._save_tracks(tracks, failed_count, playlist)
@@ -125,7 +134,7 @@ class SpotifyImport:
         print('Done!')
 
     def _run_csv(self):
-        playlist = self.sp.user_playlist_create(user=self._get_user_id(), name=self.playlist, public=False)
+        playlist = self._create_playlist_if_needed()
 
         with open(self.songs) as songs_csv, open('failed.txt', 'w') as failed_file:
             tracks = []
@@ -136,7 +145,8 @@ class SpotifyImport:
             if not all(field in datareader.fieldnames for field in required_fields):
                 raise SpotifyImportException(
                     f"Some of the required fields {required_fields!r} missing from {self.songs!r}")
-            for row in datareader:
+            pbar = tqdm(datareader)
+            for row in pbar:
                 title = row['title']
                 artist = row['artist']
                 album = row.get('album', None)
@@ -146,22 +156,31 @@ class SpotifyImport:
                 else:
                     query = ' - '.join((artist, title))
                 query = replace_bad_words(query)
-                result = self.sp.search(query)
-                track_items = dict_get(result, 'tracks', 'items')
-                if not track_items:
+                pbar.set_description(query)
+
+                try:
+                    result = self.sp.search(query)
+                except (SpotifyException, requests.exceptions.ConnectionError,
+                        requests.exceptions.ReadTimeout) as e:
                     failed_count += 1
-                    print(f"Failed {query!r}")
+                    print(f"Couldn't retrieve tracks for {query!r}: {e}")
                     print(query, file=failed_file)
-                    continue
+                else:
+                    track_items = dict_get(result, 'tracks', 'items')
+                    if not track_items:
+                        failed_count += 1
+                        print(f"Failed {query!r}")
+                        print(query, file=failed_file)
+                        continue
 
-                track_ids_and_names = [(item['id'], ' - '.join((', '.join(artist['name'] for artist in item['artists']),
-                                                                item['name'],
-                                                                item['album']['name'])))
-                                       for item in track_items]
-                track_ids_and_names.sort(key=lambda x: SequenceMatcher(None, query, x[1]).ratio(), reverse=True)
-                track_id = track_ids_and_names[0][0]
+                    track_ids_and_names = [(item['id'], ' - '.join((', '.join(artist['name'] for artist in item['artists']),
+                                                                    item['name'],
+                                                                    item['album']['name'])))
+                                           for item in track_items]
+                    track_ids_and_names.sort(key=lambda x: SequenceMatcher(None, query, x[1]).ratio(), reverse=True)
+                    track_id = track_ids_and_names[0][0]
 
-                tracks.append(track_id)
+                    tracks.append(track_id)
 
                 if len(tracks) == self.LIBRARY_ADD_TRACK_LIMIT:
                     self._save_tracks(tracks, failed_count, playlist)
