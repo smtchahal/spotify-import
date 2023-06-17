@@ -141,3 +141,7 @@ cython_debug/
 /*.csv
 
 .cache-*
+
+/songs.txt
+/songs.csv
+/failed.txt

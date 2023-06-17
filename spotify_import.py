@@ -32,8 +32,7 @@ class SpotifyImport:
     PLAYLIST_ADD_TRACK_LIMIT = 100
     LIBRARY_ADD_TRACK_LIMIT = 50
 
-    def __init__(self, username, destination, songs, playlist=None):
-        self.username = username
+    def __init__(self, destination, songs, playlist=None):
         self.destination = destination
         self.songs = songs
         if destination == 'playlist':
@@ -247,7 +246,6 @@ class SpotifyImport:
 def main():
     parser = argparse.ArgumentParser(
         description='Simple CLI utility to import songs into a Spotify library or playlist')
-    parser.add_argument('username', help='your Spotify username')
     parser.add_argument('songs', help='path to your songs.txt or songs.csv file')
 
     subparsers = parser.add_subparsers(metavar='destination', dest='destination', required=True,
@@ -260,7 +258,7 @@ def main():
     args = parser.parse_args()
 
     playlist = getattr(args, 'playlist', None)
-    spotify_import = SpotifyImport(args.username, args.destination, args.songs, playlist)
+    spotify_import = SpotifyImport(args.destination, args.songs, playlist)
     spotify_import.run()
 
 
