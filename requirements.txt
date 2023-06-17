@@ -1,2 +1,3 @@
-python-dotenv>=0.13.0,<=0.13.99
+python-dotenv>=1.0.0,<=1.0.99
 spotipy>=2.22.1,<=2.22.99
+pytest>=7.3.2,<=7.3.99

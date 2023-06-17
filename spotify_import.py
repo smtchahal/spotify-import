@@ -13,9 +13,13 @@ from spotipy import SpotifyOAuth
 
 def dict_get(adict: dict, *keys: str):
     current = adict
+    if not keys:
+        return None
     for key in keys:
-        if current:
+        if current and key in current:
             current = current.get(key, None)
+        else:
+            current = None
     return current
 
 
@@ -26,6 +30,20 @@ class SpotifyImportException(Exception):
 
 def scoped(scopes: List[str]):
     return ' '.join(scopes)
+
+
+def replace_bad_words(song: str):
+    bad_words = ('feat. ', 'ft. ', ' (Original Mix)', ' (Original mix)', ' (original mix)', ' - Original Mix', ' &')
+    for word in bad_words:
+        song = song.replace(word, '')
+    return song
+
+
+def divide_tracks_into_chunks(tracks):
+    per_request_track_threshold = 100
+    track_sub_lists = [tracks[i:i + per_request_track_threshold] for i in
+                       range(0, len(tracks), per_request_track_threshold)]
+    return track_sub_lists
 
 
 class SpotifyImport:
@@ -40,34 +58,19 @@ class SpotifyImport:
 
         load_dotenv()
         scope = scoped(['playlist-modify-private', 'user-library-modify'])
-        # scope = scoped(['playlist-modify-private', 'user-library-modify', 'playlist-read-private'])
         self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope=scope, open_browser=False))
 
     def _get_user_id(self):
         return self.sp.me()['id']
 
-    @staticmethod
-    def _divide_tracks_into_chunks(tracks):
-        per_request_track_threshold = 100
-        track_sub_lists = [tracks[i:i + per_request_track_threshold] for i in
-                           range(0, len(tracks), per_request_track_threshold)]
-        return track_sub_lists
-
-    @staticmethod
-    def replace_bad_words(song: str):
-        bad_words = ('feat. ', 'ft. ', ' (Original Mix)', ' (Original mix)', ' (original mix)', ' &')
-        for word in bad_words:
-            song = song.replace(word, '')
-        return song
-
     def _save_tracks_to_playlist(self, playlist, tracks):
-        tracks_list = self._divide_tracks_into_chunks(tracks)
+        tracks_list = divide_tracks_into_chunks(tracks)
         for tracks in tracks_list:
             self.sp.playlist_add_items(playlist['id'], tracks)
             print(f'Added {len(tracks)} tracks to playlist')
 
     def _save_tracks_to_library(self, tracks):
-        tracks_list = self._divide_tracks_into_chunks(tracks)
+        tracks_list = divide_tracks_into_chunks(tracks)
         for tracks in tracks_list:
             self.sp.current_user_saved_tracks_add(tracks)
             print(f'Added {len(tracks)} tracks to library')
@@ -87,7 +90,7 @@ class SpotifyImport:
             failed_count = 0
 
             for song in (line.strip() for line in songs_file):
-                song = self.replace_bad_words(song)
+                song = replace_bad_words(song)
 
                 if not song:
                     continue
@@ -130,7 +133,7 @@ class SpotifyImport:
                     query = ' - '.join((artist, title, album))
                 else:
                     query = ' - '.join((artist, title))
-                query = self.replace_bad_words(query)
+                query = replace_bad_words(query)
                 result = self.sp.search(query)
                 track_items = dict_get(result, 'tracks', 'items')
                 if not track_items:
