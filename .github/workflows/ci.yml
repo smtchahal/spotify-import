@@ -1,0 +1,46 @@
+name: CI
+
+# Test + Docker build CI only. No CD/deploy/publish step lives in this file.
+#
+# Deliberately kept as ONE workflow file (rather than separate workflow files
+# chained by `workflow_run`) so the job graph renders as a single connected
+# run in the Actions summary UI. `docker_build` depends on `test`, so it uses
+# `needs:`.
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # Matches the Python version in the Dockerfile.
+          python-version: '3.9'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest
+
+  docker_build:
+    name: docker build
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Build only (no push) to catch Dockerfile / dependency breakage.
+      - run: docker build .
