@@ -6,8 +6,6 @@ name: CI
 # chained by `workflow_run`) so the job graph renders as a single connected
 # run in the Actions summary UI. `docker_build` depends on `test`, so it uses
 # `needs:`.
-#
-# Draft PRs are skipped until marked ready for review.
 
 on:
   push:
@@ -15,7 +13,6 @@ on:
     paths-ignore:
       - '**.md'
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
       - '**.md'
 
@@ -26,7 +23,6 @@ concurrency:
 jobs:
   test:
     name: pytest
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
